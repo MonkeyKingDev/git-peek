@@ -36,10 +36,6 @@ const GitGraphBackground = () => {
     const startX = canvas.width * 0.1;
     const startY = canvas.height * 0.5;
     
-    const branches = [];
-    const commits = [];
-    let time = 0;
-    
     // Define branch paths that grow over time
     const branchPaths = [
       { // Main branch
@@ -187,7 +183,7 @@ const GitGraphBackground = () => {
         cancelAnimationFrame(animationId);
       }
     };
-  }, []); // Run once on mount
+  }, [colors.accent, colors.background, colors.gitBranch, colors.gitFeature, colors.gitHotfix, colors.gitMain, colors.warning]); // Include color dependencies
 
   return (
     <canvas

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiCall, formatDate } from '../utils/api';
 import { Navigate, useNavigate } from 'react-router-dom';
@@ -8,41 +8,51 @@ function Dashboard() {
   const [repositories, setRepositories] = useState([]);
   
   // Debug user data
-  console.log('Dashboard - user object:', user);
-  console.log('Dashboard - user.name:', user?.name);
-  console.log('Dashboard - user.login:', user?.login);
   const [starredRepos, setStarredRepos] = useState([]);
   const [activeTab, setActiveTab] = useState('repositories');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (isAuthenticated && sessionId) {
-      fetchData();
-    }
-  }, [isAuthenticated, sessionId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
       // Fetch both repositories and starred repos in parallel
       const [repos, starred] = await Promise.all([
-        apiCall(`/api/repositories?session_id=${sessionId}`),
-        apiCall(`/api/starred?session_id=${sessionId}`)
+        apiCall(`/repositories?session_id=${sessionId}`),
+        apiCall(`/starred?session_id=${sessionId}`)
       ]);
       
-      setRepositories(repos);
-      setStarredRepos(starred);
+      // Ensure repos is an array
+      if (Array.isArray(repos)) {
+        setRepositories(repos);
+      } else {
+        setRepositories([]);
+        setError('Failed to load repositories. Please try again.');
+      }
+      
+      // Ensure starred is an array
+      if (Array.isArray(starred)) {
+        setStarredRepos(starred);
+      } else {
+        setStarredRepos([]);
+      }
     } catch (error) {
-      console.error('Failed to fetch data:', error);
       setError('Failed to load data. Please try again.');
+      setRepositories([]); // Ensure repositories is always an array
+      setStarredRepos([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (isAuthenticated && sessionId) {
+      fetchData();
+    }
+  }, [isAuthenticated, sessionId, fetchData]);
 
   const handleRepositoryClick = (repo) => {
     const [owner, repoName] = repo.full_name.split('/');

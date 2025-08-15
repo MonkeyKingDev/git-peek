@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { apiCall } from '../utils/api';
 import { useSSE } from '../hooks/useSSE';
+import { apiCall } from '../utils/api';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -117,6 +117,7 @@ function RepositoryAnalysis() {
   const [progress, setProgress] = useState({ step: '', message: '', progress: 0 });
   const [quarterFilter, setQuarterFilter] = useState('current'); // 'current', 'last_financial', 'past_year' - defaults to current quarter
   const [tooltip, setTooltip] = useState({ show: false, content: '', x: 0, y: 0 });
+  const [useStreaming] = useState(false); // Default to regular mode for Vercel (streaming disabled on serverless)
 
   // Prepare collaboration network data for simple SVG visualization  
   const collaborationNetworkData = useMemo(() => {
@@ -124,7 +125,7 @@ function RepositoryAnalysis() {
       return { nodes: [], edges: [], maxInteractions: 0 };
     }
 
-    const pairs = analysis.dependency_risk.pull_request_analysis.workflow_analysis.collaboration_pairs.slice(0, 8);
+    const pairs = (analysis?.dependency_risk?.pull_request_analysis?.workflow_analysis?.collaboration_pairs || []).slice(0, 8);
     const nodeMap = new Map();
     const edges = [];
     let maxInteractions = 0;
@@ -291,7 +292,7 @@ function RepositoryAnalysis() {
   const sseUrl = useMemo(() => {
     if (!sessionId) return null;
     
-    const baseUrl = `${process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000'}/api/repository/${owner}/${repo}/analysis/stream`;
+    const baseUrl = `${process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000'}/repository/${owner}/${repo}/analysis/stream`;
     
     const params = new URLSearchParams({
       session_id: sessionId,
@@ -326,27 +327,59 @@ function RepositoryAnalysis() {
     }
   }, [navigate]);
 
-  const { data: streamData, error: streamError, isConnected, connect, disconnect, reset } = useSSE(sseUrl || '', {
+  // Regular analysis fetch function
+  const fetchAnalysis = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setAnalysis(null);
+      setProgress({ step: 'starting', message: 'Loading repository analysis...', progress: 0 });
+      
+      const params = new URLSearchParams({
+        session_id: sessionId,
+        start_epoch: epochRange.start_epoch.toString(),
+        end_epoch: epochRange.end_epoch.toString()
+      });
+      
+      const endpoint = `/repository/${owner}/${repo}/analysis?${params.toString()}`;
+      const data = await apiCall(endpoint);
+      
+      setAnalysis(data);
+      setProgress({ step: 'complete', message: 'Analysis complete!', progress: 100 });
+    } catch (error) {
+      console.error('Failed to fetch analysis:', error);
+      setError('Failed to load repository analysis. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [owner, repo, sessionId, epochRange]);
+
+  const { data: streamData, error: streamError, isConnected, connect, disconnect, reset } = useSSE(useStreaming ? sseUrl : null, {
     onProgress,
     onComplete,  
     onError
   });
 
   useEffect(() => {
-    console.log('DEBUG: useEffect triggered with quarterFilter:', quarterFilter);
-    if (isAuthenticated && sessionId && sseUrl) {
-      setLoading(true);
-      setError(null);
-      setAnalysis(null);
-      reset();
-      connect();
+    if (isAuthenticated && sessionId) {
+      if (useStreaming && sseUrl) {
+        setLoading(true);
+        setError(null);
+        setAnalysis(null);
+        reset();
+        connect();
+      } else {
+        fetchAnalysis();
+      }
     }
     
     // Cleanup function to disconnect when component unmounts or dependencies change
     return () => {
-      disconnect();
+      if (useStreaming) {
+        disconnect();
+      }
     };
-  }, [owner, repo, sessionId, isAuthenticated, quarterFilter, connect, disconnect, reset]);
+  }, [owner, repo, sessionId, isAuthenticated, quarterFilter, useStreaming, sseUrl, connect, disconnect, reset, fetchAnalysis]);
 
   // Auto-disconnect when analysis is complete
   useEffect(() => {
@@ -401,32 +434,34 @@ function RepositoryAnalysis() {
               </div>
             )}
             
-            {/* Connection status */}
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '8px',
-              fontSize: '12px', 
-              color: '#6b7280', 
-              marginBottom: '16px',
-              padding: '8px 12px',
-              backgroundColor: '#f9fafb',
-              borderRadius: '6px',
-              border: '1px solid #e5e7eb'
-            }}>
-              <span>Connection status:</span>
-              {isConnected ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <IconStatusConnected size={14} />
-                  <span style={{ color: '#059669', fontWeight: '500' }}>Connected</span>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <IconStatusDisconnected size={14} />
-                  <span style={{ color: '#dc2626', fontWeight: '500' }}>Disconnected</span>
-                </div>
-              )}
-            </div>
+            {/* Connection status - only show in streaming mode */}
+            {useStreaming && (
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8px',
+                fontSize: '12px', 
+                color: '#6b7280', 
+                marginBottom: '16px',
+                padding: '8px 12px',
+                backgroundColor: '#f9fafb',
+                borderRadius: '6px',
+                border: '1px solid #e5e7eb'
+              }}>
+                <span>Connection status:</span>
+                {isConnected ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <IconStatusConnected size={14} />
+                    <span style={{ color: '#059669', fontWeight: '500' }}>Connected</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <IconStatusDisconnected size={14} />
+                    <span style={{ color: '#dc2626', fontWeight: '500' }}>Disconnected</span>
+                  </div>
+                )}
+              </div>
+            )}
             
             {/* Real-time stats */}
             {streamData && (
@@ -706,13 +741,13 @@ function RepositoryAnalysis() {
               </div>
               <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#fef7ff', borderRadius: '8px' }}>
                 <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#9333ea' }}>
-                  {filteredInsights.year_over_year.total_prs}
+                  {filteredInsights.year_over_year?.total_prs || 0}
                 </div>
                 <div style={{ color: '#6b7280', fontSize: '14px' }}>Pull Requests</div>
               </div>
               <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#fffbeb', borderRadius: '8px' }}>
                 <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#f59e0b' }}>
-                  {filteredInsights.year_over_year.overall_merge_rate}%
+                  {filteredInsights.year_over_year?.overall_merge_rate || 0}%
                 </div>
                 <div style={{ color: '#6b7280', fontSize: '14px' }}>Merge Rate</div>
               </div>
@@ -726,7 +761,7 @@ function RepositoryAnalysis() {
               </div>
             </h3>
             <div style={{ display: 'grid', gap: '16px' }}>
-              {Object.entries(filteredInsights.quarters).map(([quarter, data]) => (
+              {Object.entries(filteredInsights.quarters || {}).map(([quarter, data]) => (
                 <div key={quarter} style={{ 
                   padding: '16px', 
                   backgroundColor: '#f8fafc', 
@@ -778,7 +813,7 @@ function RepositoryAnalysis() {
             </div>
 
             {/* Key Insights */}
-            {filteredInsights.trends && (
+            {filteredInsights.trends && filteredInsights.trends.most_productive_quarter && (
               <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #e0f2fe' }}>
                 <h4 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '12px', color: '#0369a1' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -924,7 +959,7 @@ function RepositoryAnalysis() {
                 <h5 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#0369a1' }}>
                   👑 Most Active PR Authors
                 </h5>
-                {analysis.dependency_risk.pull_request_analysis.workflow_analysis.most_active_authors.map(([author, count], index) => (
+                {(analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.most_active_authors || []).map(([author, count], index) => (
                   <div key={index} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: index < 4 ? '1px solid #e0f2fe' : 'none' }}>
                     <span style={{ fontWeight: '500', color: '#1e40af' }}>{author}</span>
                     <span style={{ fontSize: '12px', color: '#64748b' }}>{count} PRs</span>
@@ -939,7 +974,7 @@ function RepositoryAnalysis() {
                     Most Active Reviewers
                   </div>
                 </h5>
-                {analysis.dependency_risk.pull_request_analysis.workflow_analysis.most_active_reviewers.map(([reviewer, count], index) => (
+                {(analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.most_active_reviewers || []).map(([reviewer, count], index) => (
                   <div key={index} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: index < 4 ? '1px solid #dcfce7' : 'none' }}>
                     <span style={{ fontWeight: '500', color: '#15803d' }}>{reviewer}</span>
                     <span style={{ fontSize: '12px', color: '#64748b' }}>{count} reviews</span>
@@ -1178,7 +1213,7 @@ function RepositoryAnalysis() {
             </div>
             
             {/* Quarterly PR Trends */}
-            {analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends && (
+            {analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends && (
               <div style={{ backgroundColor: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #dcfce7', marginTop: '16px' }}>
                 <h5 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#16a34a' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1187,34 +1222,34 @@ function RepositoryAnalysis() {
                   </div>
                 </h5>
                 <div style={{ display: 'grid', gap: '8px', fontSize: '12px' }}>
-                  {analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.most_active_quarter && (
+                  {analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.most_active_quarter && (
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <IconFire size={12} color="#dc2626" />
-                        Most Active Quarter: <strong>{analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.most_active_quarter[0]}</strong>
+                        Most Active Quarter: <strong>{analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.most_active_quarter?.[0]}</strong>
                       </div>
-                      ({analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.most_active_quarter[1].prs} PRs)
+                      ({analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.most_active_quarter?.[1]?.prs} PRs)
                     </div>
                   )}
-                  {analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.highest_quality_quarter && (
+                  {analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.highest_quality_quarter && (
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <IconStar size={12} color="#f59e0b" />
-                        Highest Quality Quarter: <strong>{analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.highest_quality_quarter[0]}</strong>
+                        Highest Quality Quarter: <strong>{analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.highest_quality_quarter?.[0]}</strong>
                       </div>
-                      ({analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.highest_quality_quarter[1].merge_rate}% merge rate)
+                      ({analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.highest_quality_quarter?.[1]?.merge_rate}% merge rate)
                     </div>
                   )}
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <IconTrending size={12} color="#059669" />
-                      Total Quarterly PRs: <strong>{analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.total_quarterly_prs}</strong>
+                      Total Quarterly PRs: <strong>{analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.total_quarterly_prs}</strong>
                     </div>
                   </div>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <IconChart size={12} color="#3b82f6" />
-                      Avg Quarterly Merge Rate: <strong>{analysis.dependency_risk.pull_request_analysis.workflow_analysis.quarterly_trends.avg_quarterly_merge_rate}%</strong>
+                      Avg Quarterly Merge Rate: <strong>{analysis.dependency_risk?.pull_request_analysis?.workflow_analysis?.quarterly_trends?.avg_quarterly_merge_rate}%</strong>
                     </div>
                   </div>
                 </div>

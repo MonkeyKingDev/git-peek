@@ -1,6 +1,6 @@
 const API_BASE_URL = process.env.NODE_ENV === 'production' 
   ? '/api' 
-  : 'http://localhost:8000';
+  : 'http://localhost:3001/api';
 
 // Global auth handler that can be set by AuthContext
 let authErrorHandler = null;
@@ -46,8 +46,10 @@ export async function apiCall(endpoint, method = 'GET', data = null) {
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
       const result = await response.json();
+      // Handle new API response format with data wrapper
+      const data = result.data !== undefined ? result.data : result;
       // Don't sanitize trusted fields that contain URLs or repository names
-      return sanitizeObject(result, ['auth_url', 'redirect_url', 'name', 'full_name', 'login', 'avatar_url']); 
+      return sanitizeObject(data, ['auth_url', 'redirect_url', 'name', 'full_name', 'login', 'avatar_url']); 
     } else {
       return await response.text();
     }
