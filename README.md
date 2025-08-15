@@ -72,7 +72,21 @@ A powerful GitHub repository analysis tool that provides comprehensive insights 
 
 ### Production Deployment
 
-#### 1. Deploy to Vercel
+#### 1. Quick Setup (Recommended)
+
+Use the automated setup script:
+
+```bash
+# Make sure you're in the project directory
+./setup-env.sh
+```
+
+This script will guide you through:
+- Creating a GitHub OAuth App
+- Setting up Vercel environment variables
+- Deploying to production
+
+#### 2. Manual Setup
 
 1. **Install Vercel CLI**
    ```bash
@@ -85,7 +99,11 @@ A powerful GitHub repository analysis tool that provides comprehensive insights 
    vercel
    ```
 
-3. **Set production environment variables**
+3. **Create production GitHub OAuth App**
+   - Go to [GitHub Developer Settings](https://github.com/settings/developers)
+   - Create a new OAuth App with callback URL: `https://your-domain.vercel.app/api/auth/callback`
+
+4. **Set production environment variables**
    In your Vercel dashboard, add these environment variables:
    ```
    GITHUB_CLIENT_ID=your_production_github_client_id
@@ -94,10 +112,6 @@ A powerful GitHub repository analysis tool that provides comprehensive insights 
    JWT_SECRET=your_super_secret_production_jwt_key
    FRONTEND_URL=https://your-domain.vercel.app
    ```
-
-4. **Create production GitHub OAuth App**
-   - Create another OAuth App for production
-   - Set callback URL to: `https://your-domain.vercel.app/api/auth/callback`
 
 #### 2. Automated Deployment with GitHub Actions
 
