@@ -108,7 +108,6 @@ export const useSSE = (url, options = {}) => {
               break;
           }
         } catch (parseError) {
-          console.error('Failed to parse SSE data:', parseError);
           setError('Failed to parse server response');
         }
       };
@@ -119,7 +118,6 @@ export const useSSE = (url, options = {}) => {
         // Check if this might be a 401 error (connection fails immediately)
         if (retryCountRef.current === 0 && eventSource.readyState === EventSource.CLOSED) {
           // First failure that immediately closes - likely auth error
-          console.warn('SSE connection failed immediately - possible 401 error');
           setError('Authentication failed. Please log in again.');
           if (optionsRef.current.onError) {
             optionsRef.current.onError('Authentication failed. Please log in again.');
@@ -130,7 +128,6 @@ export const useSSE = (url, options = {}) => {
         // Implement retry logic for other errors
         if (retryCountRef.current < maxRetries) {
           retryCountRef.current += 1;
-          console.log(`Connection failed, retrying (${retryCountRef.current}/${maxRetries})...`);
           
           // Retry with exponential backoff
           setTimeout(() => {

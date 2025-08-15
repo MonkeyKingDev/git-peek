@@ -17,27 +17,18 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log('AuthContext useEffect triggered');
-    console.log('Full URL:', window.location.href);
-    console.log('Search params:', window.location.search);
-    console.log('Pathname:', window.location.pathname);
     
     const urlParams = new URLSearchParams(window.location.search);
     const sessionFromUrl = urlParams.get('session');
     
-    console.log('AuthContext useEffect - sessionFromUrl:', sessionFromUrl);
-    console.log('AuthContext useEffect - current URL:', window.location.href);
-    console.log('All URL params:', Object.fromEntries(urlParams.entries()));
     
     if (sessionFromUrl) {
-      console.log('Setting session from URL:', sessionFromUrl);
       setSessionId(sessionFromUrl);
       // Clean up the URL
       window.history.replaceState({}, document.title, window.location.pathname);
       checkSession(sessionFromUrl);
     } else {
       const savedSession = localStorage.getItem('github_session');
-      console.log('No session in URL, checking localStorage:', savedSession);
       if (savedSession) {
         setSessionId(savedSession);
         checkSession(savedSession);
@@ -48,22 +39,14 @@ export function AuthProvider({ children }) {
   }, []);
 
   const checkSession = async (session) => {
-    console.log('checkSession called with:', session);
     try {
-      console.log('Making API call to validate session...');
       const userData = await apiCall(`/auth/user?session_id=${session}`);
-      console.log('Session validation successful, user data:', userData);
-      console.log('User name:', userData?.name);
-      console.log('User login:', userData?.login);
       setUser(userData);
       localStorage.setItem('github_session', session);
       setLoading(false);
     } catch (error) {
-      console.error('Session validation failed:', error);
-      
       // Check if it's a 401/auth error
       if (error.message.includes('Session expired') || error.message.includes('401')) {
-        console.log('Auth error detected in checkSession - clearing session');
         localStorage.removeItem('github_session');
         setSessionId(null);
         setUser(null);
@@ -78,7 +61,6 @@ export function AuthProvider({ children }) {
       const response = await apiCall('/auth/login');
       window.location.href = response.auth_url;
     } catch (error) {
-      console.error('Login failed:', error);
       throw error;
     }
   };
@@ -89,7 +71,7 @@ export function AuthProvider({ children }) {
         await apiCall('/auth/logout', 'POST', { session_id: sessionId });
       }
     } catch (error) {
-      console.error('Logout error:', error);
+      // Ignore logout errors
     } finally {
       localStorage.removeItem('github_session');
       setSessionId(null);
@@ -98,7 +80,6 @@ export function AuthProvider({ children }) {
   };
 
   const handleAuthError = () => {
-    console.log('Handling auth error - clearing session and redirecting to login');
     localStorage.removeItem('github_session');
     setSessionId(null);
     setUser(null);
