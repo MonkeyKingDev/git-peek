@@ -1,6 +1,6 @@
 const API_BASE_URL = process.env.NODE_ENV === 'production' 
   ? '/api' 
-  : 'http://localhost:3001/api';
+  : 'http://localhost:8000/api';
 
 // Global auth handler that can be set by AuthContext
 let authErrorHandler = null;
