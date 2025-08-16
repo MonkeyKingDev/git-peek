@@ -1,6 +1,7 @@
 /**
  * GitHub API utility functions
  */
+import fetch from 'node-fetch';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 

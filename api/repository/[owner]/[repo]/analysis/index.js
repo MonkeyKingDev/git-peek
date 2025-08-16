@@ -15,13 +15,30 @@ export default asyncHandler(async (req, res) => {
   if (handleCors(req, res)) return;
   
   const startTime = Date.now();
-  const { owner, repo, start_epoch, end_epoch } = req.query;
+  const { owner, repo, start_epoch, end_epoch, session_id } = req.query;
+  
+  console.log('Analysis request:', { owner, repo, hasSession: !!session_id });
   
   if (!owner || !repo) {
     throw new Error('Owner and repository name required');
   }
   
-  const session = getSessionFromRequest(req);
+  // Get session if provided, otherwise this will work for public repos only
+  let session = null;
+  let accessToken = null;
+  
+  if (session_id) {
+    try {
+      session = getSessionFromRequest(req);
+      accessToken = session.access_token;
+      console.log('Session validated for user:', session.user?.login);
+    } catch (error) {
+      console.error('Session validation error:', error);
+      throw new Error('Invalid session provided. Please log in again.');
+    }
+  } else {
+    console.log('No session provided, attempting public access');
+  }
   
   // Build date range for filtering
   const dateRange = {
@@ -29,15 +46,39 @@ export default asyncHandler(async (req, res) => {
     until: end_epoch ? new Date(parseInt(end_epoch) * 1000).toISOString() : undefined
   };
   
-  // Fetch all data in parallel for optimal performance
-  const [repoData, languagesData, contentsData, commits, pullRequests, issues] = await Promise.all([
-    githubApiRequest(`/repos/${owner}/${repo}`, session.access_token),
-    githubApiRequest(`/repos/${owner}/${repo}/languages`, session.access_token).catch(() => ({})),
-    githubApiRequest(`/repos/${owner}/${repo}/contents`, session.access_token).catch(() => []),
-    fetchCommits(owner, repo, session.access_token, dateRange),
-    fetchPullRequests(owner, repo, session.access_token, dateRange),
-    fetchIssues(owner, repo, session.access_token, dateRange)
-  ]);
+  try {
+    console.log('Fetching GitHub data for:', `${owner}/${repo}`);
+    
+    // Fetch all data in parallel for optimal performance
+    const [repoData, languagesData, contentsData, commits, pullRequests, issues] = await Promise.all([
+      githubApiRequest(`/repos/${owner}/${repo}`, accessToken),
+      githubApiRequest(`/repos/${owner}/${repo}/languages`, accessToken).catch(err => {
+        console.warn('Languages fetch failed:', err.message);
+        return {};
+      }),
+      githubApiRequest(`/repos/${owner}/${repo}/contents`, accessToken).catch(err => {
+        console.warn('Contents fetch failed:', err.message);
+        return [];
+      }),
+      fetchCommits(owner, repo, accessToken, dateRange).catch(err => {
+        console.warn('Commits fetch failed:', err.message);
+        return [];
+      }),
+      fetchPullRequests(owner, repo, accessToken, dateRange).catch(err => {
+        console.warn('Pull requests fetch failed:', err.message);
+        return [];
+      }),
+      fetchIssues(owner, repo, accessToken, dateRange).catch(err => {
+        console.warn('Issues fetch failed:', err.message);
+        return [];
+      })
+    ]);
+    
+    console.log('GitHub data fetched successfully');
+  } catch (error) {
+    console.error('Failed to fetch GitHub data:', error);
+    throw new Error(`Failed to fetch repository data: ${error.message}`);
+  }
   
   // Process data using our analysis utilities
   const contributors = extractContributors(commits);
