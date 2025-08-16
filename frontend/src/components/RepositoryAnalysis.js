@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSSE } from '../hooks/useSSE';
-import { apiCall } from '../utils/api';
+import { apiCall, getApiBaseUrl } from '../utils/api';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -292,7 +292,7 @@ function RepositoryAnalysis() {
   const sseUrl = useMemo(() => {
     if (!sessionId) return null;
     
-    const baseUrl = `${process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000'}/repository/${owner}/${repo}/analysis/stream`;
+    const baseUrl = `${getApiBaseUrl()}/api/repository/${owner}/${repo}/analysis/stream`;
     
     const params = new URLSearchParams({
       session_id: sessionId,
