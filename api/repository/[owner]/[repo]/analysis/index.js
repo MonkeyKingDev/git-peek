@@ -1,6 +1,6 @@
-import { getSessionFromRequest } from '../../../utils/auth.js';
-import { asyncHandler, handleCors, sendSuccess } from '../../../utils/response.js';
-import { githubApiRequest, fetchCommits, fetchPullRequests, fetchIssues } from '../../../utils/github.js';
+import { getSessionFromRequest } from '../../../../utils/auth.js';
+import { asyncHandler, handleCors, sendSuccess } from '../../../../utils/response.js';
+import { githubApiRequest, fetchCommits, fetchPullRequests, fetchIssues } from '../../../../utils/github.js';
 import { 
   extractContributors, 
   generateCollaborationPairs, 
@@ -9,7 +9,7 @@ import {
   generateActivityHeatmap,
   calculateQuarterlyInsights,
   calculateRiskAssessment
-} from '../../../utils/analysis.js';
+} from '../../../../utils/analysis.js';
 
 export default asyncHandler(async (req, res) => {
   if (handleCors(req, res)) return;
@@ -46,11 +46,20 @@ export default asyncHandler(async (req, res) => {
     until: end_epoch ? new Date(parseInt(end_epoch) * 1000).toISOString() : undefined
   };
   
+  console.log('Date range filtering:', {
+    start_epoch,
+    end_epoch,
+    since: dateRange.since,
+    until: dateRange.until
+  });
+  
+  let repoData, languagesData, contentsData, commits, pullRequests, issues;
+  
   try {
     console.log('Fetching GitHub data for:', `${owner}/${repo}`);
     
     // Fetch all data in parallel for optimal performance
-    const [repoData, languagesData, contentsData, commits, pullRequests, issues] = await Promise.all([
+    [repoData, languagesData, contentsData, commits, pullRequests, issues] = await Promise.all([
       githubApiRequest(`/repos/${owner}/${repo}`, accessToken),
       githubApiRequest(`/repos/${owner}/${repo}/languages`, accessToken).catch(err => {
         console.warn('Languages fetch failed:', err.message);
@@ -75,6 +84,11 @@ export default asyncHandler(async (req, res) => {
     ]);
     
     console.log('GitHub data fetched successfully');
+    console.log('Data counts:', {
+      commits: commits?.length || 0,
+      pullRequests: pullRequests?.length || 0,
+      issues: issues?.length || 0
+    });
   } catch (error) {
     console.error('Failed to fetch GitHub data:', error);
     throw new Error(`Failed to fetch repository data: ${error.message}`);
@@ -116,11 +130,23 @@ export default asyncHandler(async (req, res) => {
     dependency_risk: {
       key_contributors: contributors.slice(0, 5).map(contributor => {
         const totalContributions = contributors.reduce((sum, c) => sum + c.contributions, 0);
+        const percentage = totalContributions > 0 
+          ? Math.round((contributor.contributions / totalContributions) * 100) 
+          : 0;
+        
+        // Calculate risk level based on contribution percentage
+        let risk_level = 'low';
+        if (percentage >= 40) {
+          risk_level = 'high';
+        } else if (percentage >= 20) {
+          risk_level = 'medium';
+        }
+        
         return {
           name: contributor.login,
-          percentage: totalContributions > 0 
-            ? Math.round((contributor.contributions / totalContributions) * 100) 
-            : 0
+          commits: contributor.contributions,
+          percentage: percentage,
+          risk_level: risk_level
         };
       }),
       pull_request_analysis: {

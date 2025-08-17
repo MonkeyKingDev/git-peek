@@ -11,7 +11,7 @@ export default asyncHandler(async (req, res) => {
     '/user/repos', 
     session.access_token, 
     { sort: 'updated' },
-    100 // Limit to 100 repos for performance
+    200 // Limit to 200 repos for performance
   );
   
   sendSuccess(res, repositories);
