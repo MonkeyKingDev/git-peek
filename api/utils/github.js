@@ -38,6 +38,85 @@ export async function githubApiRequest(endpoint, accessToken, options = {}) {
 }
 
 /**
+ * Fetch pages with early termination based on date range
+ * @param {string} endpoint - API endpoint
+ * @param {string} accessToken - GitHub access token
+ * @param {object} params - Query parameters
+ * @param {string} since - Start date (ISO string)
+ * @param {string} until - End date (ISO string)
+ * @param {string} dateField - Field name containing the date (e.g., 'created_at')
+ * @returns {Promise<Array>} Items within date range
+ */
+export async function fetchPagesWithDateTermination(endpoint, accessToken, params = {}, since, until, dateField) {
+  const allItems = [];
+  let page = 1;
+  const perPage = 100;
+  let shouldContinue = true;
+  
+  while (shouldContinue) {
+    const queryParams = new URLSearchParams({
+      ...params,
+      per_page: perPage,
+      page: page
+    });
+    
+    const items = await githubApiRequest(`${endpoint}?${queryParams}`, accessToken);
+    
+    if (!Array.isArray(items) || items.length === 0) {
+      break;
+    }
+    
+    // Filter items and check for early termination
+    const validItems = [];
+    let shouldTerminate = false;
+    
+    for (const item of items) {
+      // Handle nested date fields like 'commit.author.date'
+      let itemDate;
+      if (dateField.includes('.')) {
+        const parts = dateField.split('.');
+        let value = item;
+        for (const part of parts) {
+          value = value?.[part];
+        }
+        itemDate = new Date(value || item.created_at);
+      } else {
+        itemDate = new Date(item[dateField]);
+      }
+      
+      // If we've gone past our date range (too old), stop fetching
+      if (since && itemDate < new Date(since)) {
+        shouldTerminate = true;
+        break;
+      }
+      
+      // Include items within our date range
+      if ((!since || itemDate >= new Date(since)) && (!until || itemDate <= new Date(until))) {
+        validItems.push(item);
+      }
+    }
+    
+    allItems.push(...validItems);
+    
+    // Stop if we've reached the end of our date range
+    if (shouldTerminate || items.length < perPage) {
+      shouldContinue = false;
+    }
+    
+    page++;
+    
+    // Safety limit to prevent infinite loops
+    if (page > 50) {
+      console.warn(`Reached page limit (50) for ${endpoint}`);
+      break;
+    }
+  }
+  
+  console.log(`Smart pagination: fetched ${allItems.length} items from ${page - 1} pages`);
+  return allItems;
+}
+
+/**
  * Fetch all pages of a paginated GitHub API endpoint
  * @param {string} endpoint - API endpoint
  * @param {string} accessToken - GitHub access token
@@ -88,9 +167,20 @@ export async function fetchAllPages(endpoint, accessToken, params = {}, maxItems
 export async function fetchCommits(owner, repo, accessToken, { since, until } = {}) {
   const params = {};
   if (since) params.since = since;
-  if (until) params.until = until;
+  // Note: GitHub API doesn't support 'until' for commits, so we'll filter client-side
   
-  return fetchAllPages(`/repos/${owner}/${repo}/commits`, accessToken, params, 1000);
+  console.log(`Fetching commits for ${owner}/${repo} with params:`, params);
+  
+  // Use smart pagination for until filtering to avoid fetching too much data
+  let commits = [];
+  if (until) {
+    commits = await fetchPagesWithDateTermination(`/repos/${owner}/${repo}/commits`, accessToken, params, since, until, 'commit.author.date');
+  } else {
+    commits = await fetchAllPages(`/repos/${owner}/${repo}/commits`, accessToken, params, 0); // 0 = no limit
+  }
+  
+  console.log(`Fetched ${commits.length} commits with smart pagination`);
+  return commits;
 }
 
 /**
@@ -104,22 +194,23 @@ export async function fetchCommits(owner, repo, accessToken, { since, until } = 
 export async function fetchPullRequests(owner, repo, accessToken, { since, until } = {}) {
   const params = {
     state: 'all',
-    sort: 'created'
+    sort: 'created',
+    direction: 'desc' // Get newest first for better filtering
   };
   
-  // GitHub doesn't support since/until for PRs, so we'll filter client-side if needed
-  const prs = await fetchAllPages(`/repos/${owner}/${repo}/pulls`, accessToken, params, 500);
+  console.log(`Fetching PRs for ${owner}/${repo} with date range:`, { since, until });
   
-  if (!since && !until) {
-    return prs;
+  // For date-filtered requests, use smart pagination to avoid fetching entire history
+  let prs = [];
+  if (since || until) {
+    prs = await fetchPagesWithDateTermination(`/repos/${owner}/${repo}/pulls`, accessToken, params, since, until, 'created_at');
+  } else {
+    // If no date filter, limit to reasonable amount for performance
+    prs = await fetchAllPages(`/repos/${owner}/${repo}/pulls`, accessToken, params, 1000);
   }
   
-  return prs.filter(pr => {
-    const prDate = new Date(pr.created_at);
-    if (since && prDate < new Date(since)) return false;
-    if (until && prDate > new Date(until)) return false;
-    return true;
-  });
+  console.log(`Fetched ${prs.length} PRs with smart pagination`);
+  return prs;
 }
 
 /**
@@ -131,17 +222,21 @@ export async function fetchPullRequests(owner, repo, accessToken, { since, until
  * @returns {Promise<Array>} Issues data
  */
 export async function fetchIssues(owner, repo, accessToken, { since, until } = {}) {
-  const params = { state: 'all' };
+  const params = { 
+    state: 'all',
+    sort: 'created',
+    direction: 'desc' // Get newest first
+  };
   if (since) params.since = since;
   
-  const issues = await fetchAllPages(`/repos/${owner}/${repo}/issues`, accessToken, params, 200);
-  
-  if (!until) {
-    return issues;
+  // Use smart pagination for date-filtered requests
+  let issues = [];
+  if (since || until) {
+    issues = await fetchPagesWithDateTermination(`/repos/${owner}/${repo}/issues`, accessToken, params, since, until, 'created_at');
+  } else {
+    issues = await fetchAllPages(`/repos/${owner}/${repo}/issues`, accessToken, params, 500);
   }
   
-  return issues.filter(issue => {
-    const issueDate = new Date(issue.created_at);
-    return issueDate <= new Date(until);
-  });
+  console.log(`Fetched ${issues.length} issues with smart pagination`);
+  return issues;
 }
